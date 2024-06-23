@@ -151,47 +151,101 @@ if __name__ == "__main__":
    
 ## Embed PyGame
 
-В конструкторе класса среды можно задать размер экрана. В методе `reset()` можно препарировать `pygame`, если выбран режим рендеринга `"human"`:
+В конструкторе класса среды можно задать размер экрана. Там же или в `metadata` можно задать fps. Кроме того, в конструкторе объявляются переменные `screen` и `clock`, и сразу инициализируется `pygame`, если задан режим `"rgb_array"`:
 
 ```python
-if self.render_mode == "human":
-    pygame.init()
-    self.screen = None          # будущая поверхность для отрисовки 
-    self.clock = pygame.time.Clock()
-    pygame.display.set_caption("Simplest Environment")
-
+self.render_mode = render_mode
+self.screen_size = screen_size
+self.screen = None
+self.clock = None
 ```
 
-В методе `step()` следует вызывать метод `render()`, если выбран режим "human" (или "rgb_array", если такое предусмотренно). 
+В рассмтриваемом примере реализованы два режима рендеринга (`"human"` и `"rgb_array"`).
 
-В методе `render()` нужно задать режим экрана, и производить итерацию отрисовки:
+Если задан режим `"human"`, то визуализация производится посредством окна PyGame. Окно запускается при вызове метода `render()`, либо при запуске цикла среды, в вызовах метода `step()`. При этом, после окончания циклов среды окно PyGame не закрывается тут же, а дожидается закрытия окна пользователем.
+
+В режиме `"rgb_array"` вызов метода `render()` вовзращает трехмерный массив NumPy, который может быть визуализирован функцией `imshow()` из `matplotlib.pyplot`.
+
+### `render()`
+
+Рассмотрим фрагмент основного метода `render()`:
+
+```python
+def render(self, static=True):
+    self.screen_size = (self.screen_size // self.grid_size) * self.grid_size
+    if self.render_mode == "human":
+        self.human_render(static)
+    elif self.render_mode == "rgb_array":
+        return self.array_render()
+```
+
+В первой инструкии корректируется значение `screen_size`, чтобы оно было кратно `grid_size`. Далее в зависимости от режима, вызывается `human_render()` или `array_render()` в зависимости от выбранного режима.
+
+### `human_render()`
+
+В методе производится установка некоторых переменных, если они еще не установленны, и производится отрисовка (размещение элементов сцены выделено в отдельнуый метод `draw()`):
 
 ```python
 if self.screen is None:
-    self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    self.clock = pygame.time.Clock()
+    self.screen = pygame.display.set_mode((self.screen_size, self.screen_size))
+    pygame.display.set_caption("Simplest Environment")
 self.draw()
 pygame.display.flip()
-self.clock.tick(self.metadata["render_fps"])
 ```
-Добавление элементов на поверхность `self.screen` в данном случае вынесено во вспомогательную функцию `draw()`.
-
-Также желательно обработать события (по крайней мере, событие закрытия окна):
+Далее необходимо обрбатывать событие закрытия окна (тип `pygame.QUIT`). И здесь есть два варианта:
+- статическая визуализация, когда производится визуализация неподвижного состояния среды;
+- динамическая визуализация, когда производится визуализация эволюционирующей среды.
 
 ```python
-for event in pygame.event.get():
-    if event.type == pygame.QUIT:
-        self.agents = []
-        pygame.quit()
+if static:
+    running = True
+    while running:
+        self.clock.tick(self.metadata["render_fps"])
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+                self.close()
+else:
+    self.clock.tick(self.metadata["render_fps"])
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            self.close(truncate=True)
 ```
 
-Здесь при закрытии окна будет завершаться также и цикл игры, так как опустошается список `self.agents`. Однако, можно сделать и так, чтобы после закрытия окна симуляция продолжалась без визуализации, если при этом не будет производиться вызова функций `pygame` в цикле игры.
+При статической визуализации запускается собственный циклы, в котором производится визуализация и отслеживание события закрытия окна. Закрытие окна при этом не приводит к отсечению (*truncation*) в среде, а лишь сбрасывает переменные PyGame (см. метод `close()` ниже).
 
-Следует реализовать также метод `close()`, который должен вызываться пользователем после окончания цикла игры.
+При динамической визуализации, PyGame использует в качестве цикла игры цикл среды, и отрисовка запускается на каждом шаге в методе `step()`. В этом случае, закрытие окна приводит также к отсечению в среде.
+
+### `step()`
+
+В методе `step()` среды вызывается `render()` если задан режим `"human"`:
 
 ```python
-def close(self):
+if self.render_mode == "human":
+    self.render(static=False)
+```
+Так как `static=False` в `render()` производится отрисовка и отслеживания события закрытия окна. При завершении игры, сновы запускается `render()`, но тут уже `static=True`:
+
+```python
+if any(terminations.values()) or all(truncations.values()):
+    self.agents = []
+    self.render(static=True)
+```
+
+Это необходимо для того, чтобы окно PyGame не закрывалась сразу же после окончания игры, а дожидалась закрытия окна пользователем в собственном цикле.
+
+### `close()`
+
+Метод сбрасывает переменные, используемые для окна PyGame, и всегда вызывается при закрытии окна. При этом, если `truncate=False`, производится завершение игры, путем опустошения списка `self.agents`:
+```
+def close(self, truncate=False):
     if self.screen is not None:
         pygame.quit()
         self.screen = None
+        self.clock = None
+        if truncate:
+            self.agents = []
 ```
 
+>Для запуска в различных режимах, используйте файл `test_siemplest_env.ipynb`

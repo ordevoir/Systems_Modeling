@@ -18,7 +18,11 @@ class raw_env(ParallelEnv):
         "render_fps": 3,
     }
 
-    def __init__(self, grid_size=8, screen_size=320, render_mode=None):
+    def __init__(self, 
+                 grid_size=8, 
+                 max_cycles=100, 
+                 render_mode=None, 
+                 screen_size=320):
         # entity positions:
         self.escape_y = None
         self.escape_x = None
@@ -29,11 +33,15 @@ class raw_env(ParallelEnv):
 
         self.grid_size = grid_size
         self.timestep = None
+        self.max_cycles = max_cycles
         self.possible_agents = ["prisoner", "guard"]
+
         self.render_mode = render_mode
         self.screen_size = screen_size
+        self.screen = None
+        self.clock = None
     
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=None, show=True):
         self.agents = copy(self.possible_agents)
         self.timestep = 0
 
@@ -43,8 +51,8 @@ class raw_env(ParallelEnv):
         self.guard_x = self.grid_size - 1
         self.guard_y = self.grid_size - 1
 
-        self.escape_x = random.randint(2, 5)
-        self.escape_y = random.randint(2, 5)
+        self.escape_x = random.randint(2, self.grid_size-2)
+        self.escape_y = random.randint(2, self.grid_size-2)
 
         observations = {
             a: (
@@ -57,15 +65,6 @@ class raw_env(ParallelEnv):
 
         # Get dummy infos. Necessary for proper parallel_to_aec conversion
         infos = {a: {} for a in self.agents}
-
-        # prepare PyGame:
-        if self.render_mode == "human":
-            pygame.init()
-            self.screen = None  # поверхность для отрисовки 
-            self.screen_size = (self.screen_size // self.grid_size) * self.grid_size
-            self.clock = pygame.time.Clock()
-            pygame.display.set_caption("Simplest Environment")
-
         return observations, infos
     
     def step(self, actions):
@@ -136,7 +135,7 @@ class raw_env(ParallelEnv):
 
         # Check truncation conditions (overwrites termination conditions)
         truncations = {a: False for a in self.agents}
-        if self.timestep > 100:
+        if self.timestep > self.max_cycles:
             rewards = {"prisoner": 0, "guard": 0}
             truncations = {"prisoner": True, "guard": True}
             self.agents = []
@@ -161,27 +160,60 @@ class raw_env(ParallelEnv):
 
         # Get dummy infos (not used in this example)
         infos = {a: {} for a in self.agents}
-
-        if any(terminations.values()) or all(truncations.values()):
-            self.agents = []
         
         if self.render_mode == "human":
-            self.render()
+            self.render(static=False)
+
+        if any(terminations.values()) or all(truncations.values()):
+            print("Game Over!")
+            self.agents = []
+            self.render(static=True)
 
         return observations, rewards, terminations, truncations, infos
 
-    def render(self):
+    def render(self, static=True):
+        if self.render_mode is None:
+            from gymnasium.logger import warn
+            warn("You are calling render method without specifying any render mode. "
+                 "You can specify the render_mode at initialization, "
+                 'e.g. render_mode="rgb_array" or render_mode="rgb_array"')
+            return
+        
+        self.screen_size = (self.screen_size // self.grid_size) * self.grid_size
+        if self.render_mode == "human":
+            self.human_render(static)
+        elif self.render_mode == "rgb_array":
+            return self.array_render()
+
+
+    def human_render(self, static=False):
         if self.screen is None:
+            self.clock = pygame.time.Clock()
             self.screen = pygame.display.set_mode((self.screen_size, self.screen_size))
+            pygame.display.set_caption("Simplest Environment")
+
         self.draw()
         pygame.display.flip()
-        self.clock.tick(self.metadata["render_fps"])
+        if static:
+            running = True
+            while running:
+                self.clock.tick(self.metadata["render_fps"])
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        running = False
+                        self.close()
+        else:
+            self.clock.tick(self.metadata["render_fps"])
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.close(truncate=True)
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                self.agents = []
-                pygame.quit()
-
+    def array_render(self):
+        self.screen = pygame.Surface((self.screen_size, self.screen_size))
+        self.draw()
+        return np.transpose(
+            np.array(pygame.surfarray.pixels3d(self.screen)), 
+            axes=(1, 0, 2))
 
     def draw(self):
         self.screen.fill(GREY)
@@ -205,10 +237,13 @@ class raw_env(ParallelEnv):
         for i in range(1, self.grid_size):
             pygame.draw.line(self.screen, LIGHTGREY, (i*step, 0), (i*step, length))
 
-    def close(self):
+    def close(self, truncate=False):
         if self.screen is not None:
             pygame.quit()
             self.screen = None
+            self.clock = None
+            if truncate:
+                self.agents = []
 
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
@@ -222,9 +257,9 @@ from pettingzoo.test import parallel_api_test
 
 if __name__ == "__main__":
     parallel_env = raw_env(render_mode="human", grid_size=6)
-    # parallel_api_test(env, num_cycles=1_000_000)
+    # parallel_api_test(parallel_env, num_cycles=1_000_000)
     observations, infos = parallel_env.reset(seed=42)
     while parallel_env.agents:
         actions = {agent: parallel_env.action_space(agent).sample() for agent in parallel_env.agents}
         observations, rewards, terminations, truncations, infos = parallel_env.step(actions)
-    # parallel_env.close()
+    parallel_env.close()
