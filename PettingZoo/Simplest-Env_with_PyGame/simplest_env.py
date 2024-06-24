@@ -41,7 +41,7 @@ class raw_env(ParallelEnv):
         self.screen = None
         self.clock = None
     
-    def reset(self, seed=None, show=True):
+    def reset(self, seed=None):
         self.agents = copy(self.possible_agents)
         self.timestep = 0
 
@@ -54,13 +54,14 @@ class raw_env(ParallelEnv):
         self.escape_x = random.randint(2, self.grid_size-2)
         self.escape_y = random.randint(2, self.grid_size-2)
 
-        observations = {
-            a: (
+        observation = (
                 self.prisoner_x + self.grid_size * self.prisoner_y,
                 self.guard_x + self.grid_size * self.guard_y,
                 self.escape_x + self.grid_size * self.escape_y,
             )
-            for a in self.agents
+        observations = {
+            "prisoner": {"observation": observation, "action_mask": [0, 1, 1, 0]},
+            "guard": {"observation": observation, "action_mask": [1, 0, 0, 1]},
         }
 
         # Get dummy infos. Necessary for proper parallel_to_aec conversion

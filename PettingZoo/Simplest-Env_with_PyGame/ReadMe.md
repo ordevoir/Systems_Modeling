@@ -136,6 +136,35 @@ class raw_env(ParallelEnv):
 
 В нашей среде генерируются две маски `prisoner_action_mask` и `guard_action_mask`. Эти массивы размещаются под ключом `"action_mask"` в словарях соответствующих агентов.
 
+Это подразумевает изменение в наблюдении. Теперь, помимо всего прочего нужно передавать и маски. Так что если в `reset()` и `step()` без учета масок можно было передавать словарь
+
+```python
+observations = {
+    a: (
+        self.prisoner_x + 7 * self.prisoner_y,
+        self.guard_x + 7 * self.guard_y,
+        self.escape_x + 7 * self.escape_y,
+    )
+    for a in self.agents
+}
+```
+то теперь следует передавать
+
+```python
+observation = (
+    self.prisoner_x + 7 * self.prisoner_y,
+    self.guard_x + 7 * self.guard_y,
+    self.escape_x + 7 * self.escape_y,
+)
+observations = {
+    "prisoner": {
+        "observation": observation,
+        "action_mask": prisoner_action_mask,
+    },
+    "guard": {"observation": observation, "action_mask": guard_action_mask},
+}
+```
+
 ## Testing Environment
 
 Для тестирования можно добавить в конце файла следующий код:
