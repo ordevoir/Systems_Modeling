@@ -28,6 +28,7 @@ class Guard(MovableAgent):
     def __init__(self) -> None:
         super().__init__()
         self.name = "guard"
+        self.max_velocity = 1.0
 
 
 class Prompter:
@@ -49,6 +50,7 @@ class raw_env():
         self.guard = Guard()
         self.prompter = Prompter(channel_length)
         self.escape = Escape()
+        self.dt = 0.1
         self.possible_agents = [self.prisoner.name, 
                                 self.guard.name,
                                 self.prompter.name]
@@ -81,3 +83,26 @@ class raw_env():
     def step(self, actions):
         prisoner_action = actions["prisoner"]
         prompter_action = actions["prompter"]
+
+        if prisoner_action == 1:
+            self.prisoner.accelerate(force=(-1,  0), dt=self.dt)
+        elif prisoner_action == 2:
+            self.prisoner.accelerate(force=( 1,  0), dt=self.dt)
+        elif prisoner_action == 3:
+            self.prisoner.accelerate(force=( 0, -1), dt=self.dt)
+        elif prisoner_action == 4:
+            self.prisoner.accelerate(force=( 0,  1), dt=self.dt)
+        self.prisoner.move(self.dt)
+        
+        self.prompter.message = prompter_action
+
+        force = np.clip(self.prisoner.position - self.guard.position, -1, 1)
+        self.guard.accelerate(force, dt=self.dt)
+        self.guard.move(dt=self.dt)
+
+        
+
+        truncations = {a: False for a in self.agens}
+
+
+
