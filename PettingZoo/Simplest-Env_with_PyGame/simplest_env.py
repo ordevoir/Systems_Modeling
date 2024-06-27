@@ -182,28 +182,28 @@ class raw_env(ParallelEnv):
         
         self.screen_size = (self.screen_size // self.grid_size) * self.grid_size
         if self.render_mode == "human":
-            self.human_render(static)
+            self.human_render(static, "Simplest Environment")
         elif self.render_mode == "rgb_array":
             return self.array_render()
 
 
-    def human_render(self, static=False):
+    def human_render(self, static=False, caption=""):
         if self.screen is None:
             self.clock = pygame.time.Clock()
             self.screen = pygame.display.set_mode((self.screen_size, self.screen_size))
-            pygame.display.set_caption("Simplest Environment")
+            pygame.display.set_caption(caption)
 
-        self.draw()
-        pygame.display.flip()
         if static:
             running = True
             while running:
+                self.draw()
                 self.clock.tick(self.metadata["render_fps"])
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         running = False
                         self.close()
         else:
+            self.draw()
             self.clock.tick(self.metadata["render_fps"])
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -237,6 +237,7 @@ class raw_env(ParallelEnv):
             pygame.draw.line(self.screen, LIGHTGREY, (0, i*step), (length, i*step))
         for i in range(1, self.grid_size):
             pygame.draw.line(self.screen, LIGHTGREY, (i*step, 0), (i*step, length))
+        pygame.display.flip()
 
     def close(self, truncate=False):
         if self.screen is not None:
