@@ -1,7 +1,9 @@
 import numpy as np
 from copy import copy
 import functools, pygame
+import pygame.gfxdraw
 from gymnasium.spaces import Box, Discrete
+from pettingzoo import ParallelEnv
 
 GREY = (70, 70, 70)
 DARKGREY = (50, 50, 50)
@@ -52,14 +54,18 @@ class Escape:
         self.name = "escape"
 
 
-class raw_env():
+def env(*args, **kwargs):
+    return raw_env(*args, **kwargs)
+
+
+class raw_env(ParallelEnv):
     metadata = {
         "name": "prisoner-guard-prompter",
         "render_modes": ["human", "rgb_array"],
         "render_fps": 30,
     }
     def __init__(self, channel_length=8, max_cycles=150, 
-                 render_mode=None, screen_size=480):
+                 render_mode=None, screen_size=640):
         self.channel_length = channel_length
         self.prisoner = Prisoner(channel_length)
         self.guard = Guard()
@@ -68,7 +74,7 @@ class raw_env():
         self.dt = 0.1
         self.possible_agents = [self.prisoner.name, 
                                 self.prompter.name]
-        self.dist_thres = 1.
+        self.dist_thres = 0.5
         self.max_cycles = max_cycles
         self.timestep = None
         self.observation_spaces = dict()
@@ -86,10 +92,9 @@ class raw_env():
             self.screen_size = (s, s)
         elif isinstance(s, (tuple, list, np.ndarray)):
             assert len(s) == 2, "Incorrect screen size"
-            assert all(isinstance(item, int) for item in s), "Incorrect screen size"
-            assert s[0] > 100 and s[0] < 4000 and s[1] > 100 and s[1] < 4000, "Incorrect screen size"
-            self.screen_size = s
-        self.scale = min(self.screen_size) / 100.0
+            assert s[0] > 100 and s[0] < 4000 and s[1] > 100 and s[1] < 4000, "Incorrect range for screen size"
+            self.screen_size = int(s[0]), int(s[1])
+        self.scale = None
         
     def reset(self, seed=None):
         self.agents = copy(self.possible_agents)
@@ -97,13 +102,14 @@ class raw_env():
 
         if seed:
             np.random.seed(seed)
-        self.prisoner.position = np.random.uniform(-10, 10, 2).astype(np.float32)
-        self.guard.position =    np.random.uniform(-10, 10, 2).astype(np.float32)
-        self.prompter.position = np.random.uniform(-10, 10, 2).astype(np.float32)
-        self.escape.position =   np.random.uniform(-10, 10, 2).astype(np.float32)
+        self.prisoner.position = np.random.uniform(-15, 15, 2).astype(np.float32)
+        self.guard.position =    np.random.uniform(-15, 15, 2).astype(np.float32)
+        self.prompter.position = np.random.uniform(-15, 15, 2).astype(np.float32)
+        self.escape.position =   np.random.uniform(-15, 15, 2).astype(np.float32)
         self.prisoner.velocity = np.random.uniform( -1,  1, 2).astype(np.float32)
         self.guard.velocity =    np.random.uniform( -1,  1, 2).astype(np.float32)
-
+        self.scale = min(self.screen_size) / 50.0
+        
         self.init_spaces()
         observations = self.get_observations()
         infos = {self.prisoner.name: {}, self.prompter.name: {}}
@@ -158,6 +164,7 @@ class raw_env():
         self.guard.move(dt=self.dt)
 
         terminations = {a: False for a in self.agents}
+        truncations = {a: False for a in self.agents}
         rewards = {a: 0 for a in self.agents}
 
         if self.distance(self.prisoner, self.escape) < self.dist_thres:
@@ -172,7 +179,6 @@ class raw_env():
             rewards[self.guard.name] = 1
             terminations = {a: True for a in self.agents}
             self.agents = []
-        truncations = {a: False for a in self.agents}
         if self.timestep > self.max_cycles:
             truncations = {a: True for a in self.agents}
             self.agents = []
@@ -248,12 +254,14 @@ class raw_env():
             axes=(1, 0, 2))
     
     def get_coord_for_display(self, agent):
-        shift = min(self.screen_size) // 2
+        shift_x = self.screen_size[0] // 2
+        shift_y = self.screen_size[1] // 2
+        shift = np.array([shift_x, shift_y])
         return (agent.position * self.scale).astype(int) + shift 
 
     def draw(self):
         self.screen.fill(GREY)
-        radius = int(2 * self.scale)
+        radius = int(self.scale) // 2
         pygame.draw.circle(self.screen, GREEN, 
                            self.get_coord_for_display(self.prisoner), radius)
         pygame.draw.circle(self.screen, RED, 
@@ -288,6 +296,10 @@ if __name__ == "__main__":
     # parallel_api_test(parallel_env, num_cycles=1_000_000)
     observations, infos = parallel_env.reset()
     while parallel_env.agents:
-        actions = {agent: parallel_env.action_space(agent).sample() for agent in parallel_env.agents}
+        actions = {agent: parallel_env.action_space(agent).sample() 
+                   for agent in parallel_env.agents}
         observations, rewards, terminations, truncations, infos = parallel_env.step(actions)
-    # parallel_env.close()
+    print(observations)
+    print(rewards)
+    print(terminations)
+    print(truncations)
