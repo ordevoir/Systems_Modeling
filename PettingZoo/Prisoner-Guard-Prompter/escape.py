@@ -1,7 +1,6 @@
 import numpy as np
 from copy import copy
 import functools, pygame
-import pygame.gfxdraw
 from gymnasium.spaces import Box, Discrete
 from pettingzoo import ParallelEnv
 
@@ -28,57 +27,39 @@ class MovableAgent:
     def move(self, dt) -> None:
         self.position += self.velocity * dt
 
-
-
-class Guard(MovableAgent):
-    def __init__(self) -> None:
+class Prisoner(MovableAgent):
+    def __init__(self, length=None) -> None:
         super().__init__()
-        self.name = "guard"
-        self.max_velocity = 1.6
-
-
-class Prompter:
-    def __init__(self, length) -> None:
-        self.message = np.zeros(length, dtype=np.float32)
-        self.position = np.empty(2, dtype=np.float32)
-        self.name = "prompter"
+        if length:
+            self.message = np.zeros(length, dtype=np.float32)
+        self.name = "prisoner"
 
 class Escape:
     def __init__(self) -> None:
         self.position = np.empty(2, dtype=np.float32)
         self.name = "escape"
 
-
 def env(*args, **kwargs):
     return raw_env(*args, **kwargs)
 
-
 class raw_env(ParallelEnv):
     metadata = {
-        "name": "prisoner-guard-prompter",
+        "name": "escape",
         "render_modes": ["human", "rgb_array"],
         "render_fps": 30,
     }
-    def __init__(self, channel_length=8, max_cycles=150, 
+    def __init__(self, max_cycles=150, 
                  render_mode=None, screen_size=640):
-        self.channel_length = channel_length
-        self.prisoner = Prisoner(channel_length)
-        self.guard = Guard()
-        self.prompter = Prompter(channel_length)
+        self.prisoner = Prisoner()
         self.escape = Escape()
-        self.dt = 0.1
-        self.possible_agents = [self.prisoner.name, 
-                                self.prompter.name]
-        self.dist_thres = 0.5
+        self.possible_agents = [self.prisoner.name]
         self.max_cycles = max_cycles
         self.timestep = None
         self.observation_spaces = dict()
         self.action_spaces = dict()
-
-        # self.dist_to_guard = None
-        # self.dist_to_escape = None
-        self.past_dist_to_guard = None
         self.past_dist_to_escape = None
+        self.dt = 0.1
+        self.dist_thres = 0.5
         self.n_steps_for_reward = 10
 
         self.render_mode = render_mode
@@ -96,60 +77,43 @@ class raw_env(ParallelEnv):
             assert s[0] > 100 and s[0] < 4000 and s[1] > 100 and s[1] < 4000, "Incorrect range for screen size"
             self.screen_size = int(s[0]), int(s[1])
         self.scale = None
-        
+
     def reset(self, seed=None):
         self.agents = copy(self.possible_agents)
         self.timestep = 0
-
+        
         if seed:
             np.random.seed(seed)
         self.prisoner.position = np.random.uniform(-15, 15, 2).astype(np.float32)
-        self.guard.position =    np.random.uniform(-15, 15, 2).astype(np.float32)
-        self.prompter.position = np.random.uniform(-15, 15, 2).astype(np.float32)
         self.escape.position =   np.random.uniform(-15, 15, 2).astype(np.float32)
         self.prisoner.velocity = np.random.uniform( -0.1,  0.1, 2).astype(np.float32)
-        self.guard.velocity =    np.random.uniform( -0.1,  0.1, 2).astype(np.float32)
         self.past_dist_to_escape = self.distance(self.prisoner, self.escape)
-        self.past_dist_to_guard = self.distance(self.prisoner, self.guard)
         
         self.scale = min(self.screen_size) / 50.0
         
         self.init_spaces()
         observations = self.get_observations()
-        infos = {self.prisoner.name: {}, self.prompter.name: {}}
+        infos = {self.prisoner.name: {}}
         return observations, infos
-    
+        
     def init_spaces(self):
         # observation space for prisoner:
-        length = self.prompter.message.shape[0]
-        prisoner_os = Box(low=-np.inf, high=np.inf, shape=(length+4,), dtype=np.float32)
-        # observation space for prompter:
-        prompter_os = Box(low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32)
-        # action space for prompter:
-        prompter_as = Box(low=0.0, high=1.0, shape=(length,), dtype=np.float32)
+        prisoner_os = Box(low=-np.inf, high=np.inf, shape=(4,), dtype=np.float32)
         # collect spaces:
         self.observation_spaces[self.prisoner.name] = prisoner_os
-        self.observation_spaces[self.prompter.name] = prompter_os
         self.action_spaces[self.prisoner.name] = Discrete(5)
-        self.action_spaces[self.prompter.name] = prompter_as
 
     def get_observations(self):
         observations = {
             self.prisoner.name: np.concatenate((
                                 self.prisoner.velocity, 
-                                self.prompter.position - self.prisoner.position,
-                                self.prompter.message,
+                                self.escape.position - self.prisoner.position,
                                 )),
-            self.prompter.name: np.concatenate((
-                                self.guard.position - self.prompter.position,
-                                self.escape.position - self.prompter.position,
-                                )) 
         }
         return observations
-    
+        
     def act(self, actions):
         prisoner_action = actions["prisoner"]
-        prompter_action = actions["prompter"]
         # !!!
         if prisoner_action == 1:
             self.prisoner.accelerate(force=np.array([-3,  0]), dt=self.dt)
@@ -160,14 +124,7 @@ class raw_env(ParallelEnv):
         elif prisoner_action == 4:
             self.prisoner.accelerate(force=np.array([ 0,  3]), dt=self.dt)
         self.prisoner.move(self.dt)
-        
-        self.prompter.message = prompter_action
 
-        force = np.clip(self.prisoner.position - self.guard.position, -1, 1)
-        # !!!
-        # self.guard.accelerate(force, dt=self.dt)
-        # self.guard.move(dt=self.dt)
-    
     def step(self, actions):
         self.act(actions)
         
@@ -177,16 +134,9 @@ class raw_env(ParallelEnv):
 
         if self.distance(self.prisoner, self.escape) < self.dist_thres:
             rewards[self.prisoner.name] =  100 
-            rewards[self.prompter.name] =  100
-            rewards[self.guard.name]    = -100
             terminations = {a: True for a in self.agents}
             self.agents = []
-        if self.distance(self.prisoner, self.guard) < self.dist_thres:
-            rewards[self.prisoner.name] = -100
-            rewards[self.prompter.name] = -100
-            rewards[self.guard.name]    =  100
-            terminations = {a: True for a in self.agents}
-            self.agents = []
+
         if self.timestep > self.max_cycles:
             truncations = {a: True for a in self.agents}
             self.agents = []
@@ -202,18 +152,14 @@ class raw_env(ParallelEnv):
         # measure distances every n_steps_for_reward steps for make rewards
         elif self.timestep % self.n_steps_for_reward == 0:
             dist_to_escape = self.distance(self.prisoner, self.escape)
-            dist_to_guard = self.distance(self.prisoner, self.guard)
             # !!!
             score = 3 * (self.past_dist_to_escape - dist_to_escape)
-            # score += dist_to_guard - self.past_dist_to_guard
             self.past_dist_to_escape = dist_to_escape
-            self.past_dist_to_guard = dist_to_guard
             reward = 20 if score > 0 else -20
             rewards[self.prisoner.name] += reward
-            rewards[self.prompter.name] += reward
 
         observations = self.get_observations()
-        infos = {self.prisoner.name: {}, self.prompter.name: {}}
+        infos = {self.prisoner.name: {}}
         return observations, rewards, terminations, truncations, infos
 
     @staticmethod
@@ -233,7 +179,7 @@ class raw_env(ParallelEnv):
             self.human_render(static, "Prisoner Guard Prompter")
         elif self.render_mode == "rgb_array":
             return self.array_render()
-    
+        
     def human_render(self, static=False, caption=""):
         if self.screen is None:
             self.clock = pygame.time.Clock()
@@ -265,14 +211,14 @@ class raw_env(ParallelEnv):
             elif event.button == 5:
                 self.scale *= 0.7
 
-    
+        
     def array_render(self):
         self.screen = pygame.Surface((self.screen_size, self.screen_size))
         self.draw()
         return np.transpose(
             np.array(pygame.surfarray.pixels3d(self.screen)), 
             axes=(1, 0, 2))
-    
+        
     def get_coord_for_display(self, agent):
         shift_x = self.screen_size[0] // 2
         shift_y = self.screen_size[1] // 2
@@ -284,10 +230,6 @@ class raw_env(ParallelEnv):
         radius = int(self.scale) // 2
         pygame.draw.circle(self.screen, Colors.GREEN, 
                            self.get_coord_for_display(self.prisoner), radius)
-        pygame.draw.circle(self.screen, Colors.RED, 
-                           self.get_coord_for_display(self.guard), radius)
-        pygame.draw.circle(self.screen, Colors.ORANGE, 
-                           self.get_coord_for_display(self.prompter), radius)
         width = 2 * radius
         position = self.get_coord_for_display(self.escape) - radius
         box = (position[0], position[1], width, width)
@@ -301,7 +243,7 @@ class raw_env(ParallelEnv):
             self.clock = None
             if truncate:
                 self.agents = []
-
+                
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
         return self.observation_spaces[agent]
@@ -309,7 +251,7 @@ class raw_env(ParallelEnv):
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent):
         return self.action_spaces[agent]
-
+    
 
 if __name__ == "__main__":
     parallel_env = raw_env(render_mode="human", max_cycles=1000)
