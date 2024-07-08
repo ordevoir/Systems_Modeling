@@ -86,7 +86,7 @@ class raw_env(ParallelEnv):
             np.random.seed(seed)
         self.prisoner.position = np.random.uniform(-15, 15, 2).astype(np.float32)
         self.escape.position =   np.random.uniform(-15, 15, 2).astype(np.float32)
-        self.prisoner.velocity = np.random.uniform( -0.1,  0.1, 2).astype(np.float32)
+        self.prisoner.velocity = np.random.uniform( -0.5,  0.5, 2).astype(np.float32)
         self.past_dist_to_escape = self.distance(self.prisoner, self.escape)
         
         self.scale = min(self.screen_size) / 50.0
@@ -133,7 +133,7 @@ class raw_env(ParallelEnv):
         rewards = {a: -1 for a in self.agents}
 
         if self.distance(self.prisoner, self.escape) < self.dist_thres:
-            rewards[self.prisoner.name] =  100 
+            rewards[self.prisoner.name] = 20
             terminations = {a: True for a in self.agents}
             self.agents = []
 
@@ -150,13 +150,16 @@ class raw_env(ParallelEnv):
             if self.render_mode == "human": print("Game Over!")
             self.render(static=True)
         # measure distances every n_steps_for_reward steps for make rewards
-        elif self.timestep % self.n_steps_for_reward == 0:
+        else:
+        # elif self.timestep % self.n_steps_for_reward == 0:
             dist_to_escape = self.distance(self.prisoner, self.escape)
             # !!!
-            score = 3 * (self.past_dist_to_escape - dist_to_escape)
+            score = self.past_dist_to_escape - dist_to_escape
             self.past_dist_to_escape = dist_to_escape
-            reward = 20 if score > 0 else -20
-            rewards[self.prisoner.name] += reward
+            reward = 1 if score > 0 else -1
+            # reward = 20 if score > 0 else -20
+            rewards[self.prisoner.name] = score * 10
+            # rewards[self.prisoner.name] += reward
 
         observations = self.get_observations()
         infos = {self.prisoner.name: {}}
@@ -210,6 +213,15 @@ class raw_env(ParallelEnv):
                 self.scale *= 1.5
             elif event.button == 5:
                 self.scale *= 0.7
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_a:
+                self.prisoner.accelerate(force=np.array([-3,  0]), dt=self.dt)
+            if event.key == pygame.K_d:
+                self.prisoner.accelerate(force=np.array([3,  0]), dt=self.dt)
+            if event.key == pygame.K_w:
+                self.prisoner.accelerate(force=np.array([0,  -3]), dt=self.dt)
+            if event.key == pygame.K_s:
+                self.prisoner.accelerate(force=np.array([0,  3]), dt=self.dt)
 
         
     def array_render(self):
